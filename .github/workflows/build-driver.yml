@@ -7,21 +7,21 @@ on:
         required: true
         description: Metabase version to compile with
         type: string
-        default: v0.50.13
+        default: v0.51.1
 
 jobs:
   build-connector:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout Metabase Code"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           repository: metabase/metabase
           ref: ${{ github.event.inputs.metabase-version }}
           path: metabase
 
       - name: "Checkout Driver"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           path: metabase-dremio-driver
 
@@ -43,7 +43,7 @@ jobs:
           cd metabase-dremio-driver && ./build.sh
 
       - name: Upload resulting jar file
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: dremio.metabase-driver.jar
           path: metabase-dremio-driver/target/dremio.metabase-driver.jar
