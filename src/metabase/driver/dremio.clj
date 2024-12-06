@@ -16,8 +16,7 @@
             [metabase.driver.sql-jdbc.sync.describe-database :as sync.describe-database]
             [metabase.driver.sql-jdbc.sync.interface :as sync.i]
             [metabase.driver.sql.query-processor :as sql.qp]
-            [metabase.driver.sql.util.unprepare :as unprepare]
-            [metabase.mbql.util :as mbql.u]
+            [metabase.legacy-mbql.util :as mbql.u]
             [metabase.public-settings :as pubset]
             [metabase.query-processor.store :as qp.store]
             [metabase.query-processor.util :as qputil]
@@ -29,7 +28,8 @@
 (driver/register! :dremio, :parent #{:postgres ::legacy/use-legacy-classes-for-read-and-set})
 
 (doseq [[feature supported?] {:table-privileges                false
-                              :set-timezone                    false}]
+                              :set-timezone                    false
+                              :connection-impersonation        false}]
   (defmethod driver/database-supports? [:dremio feature] [_driver _feature _db] supported?))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
@@ -42,8 +42,11 @@
 ;;; ----------------------------------------------------- Impls ------------------------------------------------------
 ;;; +----------------------------------------------------------------------------------------------------------------+
 
-;; don't use the Postgres implementation for `describe-table` since it tries to fetch enums which Dremio doesn't
-;; support
+;; don't use the Postgres specified implementation for `describe-database` and `describe-table`
+(defmethod driver/describe-database :dremio
+           [& args]
+           (apply (get-method driver/describe-database :sql-jdbc) args))
+
 (defmethod driver/describe-table :dremio
   [& args]
   (apply (get-method driver/describe-table :sql-jdbc) args))
@@ -97,21 +100,26 @@
   (let [inner-query (-> (assoc inner-query
                           :remark (qputil/query->remark :dremio outer-query)
                           :query  (if (seq params)
-                                    (unprepare/unprepare driver (cons sql params))
+                                    (sql.qp/format-honeysql driver (cons sql params))
                                     sql)
                           :max-rows (mbql.u/query->max-rows-limit outer-query))
                         (dissoc :params))
         query       (assoc outer-query :native inner-query)]
     ((get-method driver/execute-reducible-query :postgres) driver query context respond)))
 
+(defmethod sql.qp/format-honeysql :dremio
+  [driver honeysql-form]
+  (binding [driver/*compile-with-inline-parameters* true]
+    ((get-method sql.qp/format-honeysql :postgres) driver honeysql-form)))
+
 ;; Dremio's cast DateTime to STRING methods (when unprepare)
-(defmethod unprepare/unprepare-value [:dremio OffsetDateTime]
+(defmethod sql.qp/inline-value [:dremio OffsetDateTime]
   [_ t]
   (format "timestamp '%s'" (t/format "yyyy-MM-dd HH:mm:ss.SSS" t)))
 
-(defmethod unprepare/unprepare-value [:dremio ZonedDateTime]
+(defmethod sql.qp/inline-value [:dremio ZonedDateTime]
   [driver t]
-  (unprepare/unprepare-value driver (t/offset-date-time t)))
+  (sql.qp/inline-value driver (t/offset-date-time t)))
 
 ;; Dremio is always in UTC
 (defmethod driver/db-default-timezone :dremio [_ _]
